@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context=".SensorDataActivity"
+    android:background="@color/white">
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" >
+
+            <TextView
+                android:id="@+id/sensordata_activity_tv_collectdata"
+                style="@style/title_style"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/sensordata_collectdata"
+                android:textAlignment="center" />
+
+            <TextView
+                android:id="@+id/sensordata_activity_tv_uploadstatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:fontFamily="@font/roboto"
+                android:gravity="center"
+                android:textColor="@color/black" />
+
+            <Chronometer
+                android:id="@+id/sensordata_activity_chm_stopwatch"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:layout_marginTop="50dip"
+                android:layout_marginBottom="50dip" />
+
+            <Button
+                android:id="@+id/sensordata_activity_btn_stop"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:fontFamily="@font/roboto"
+                android:text="@string/sensordata_stop"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/sensordata_activity_btn_start"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:fontFamily="@font/roboto"
+                android:text="@string/sensordata_start"
+                android:textStyle="bold" />
+
+        </LinearLayout>
+    </ScrollView>
+
+</androidx.constraintlayout.widget.ConstraintLayout>
