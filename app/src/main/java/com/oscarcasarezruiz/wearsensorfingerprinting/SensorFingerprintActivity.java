@@ -7,6 +7,7 @@ import android.os.Bundle;
 import android.support.wearable.activity.WearableActivity;
 import android.util.Log;
 import android.view.View;
+import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -16,10 +17,13 @@ import com.google.android.gms.tasks.OnCompleteListener;
 import com.google.android.gms.tasks.OnFailureListener;
 import com.google.android.gms.tasks.OnSuccessListener;
 import com.google.android.gms.tasks.Task;
+import com.google.firebase.FirebaseApp;
 import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.firebase.firestore.QueryDocumentSnapshot;
 import com.google.firebase.firestore.QuerySnapshot;
+import com.google.firebase.storage.FileDownloadTask;
 import com.google.firebase.storage.FirebaseStorage;
+import com.google.firebase.storage.StorageMetadata;
 import com.google.firebase.storage.StorageReference;
 import com.google.firebase.storage.UploadTask;
 import com.google.gson.Gson;
@@ -33,6 +37,7 @@ import java.io.IOException;
 import java.util.Date;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Scanner;
 import java.util.UUID;
 
 
@@ -47,6 +52,8 @@ public class SensorFingerprintActivity extends WearableActivity implements Senso
     private TextView mResult;
     private TextView mSensorFingerprintResult;
     private TextView mMatchScore;
+    private Button mCorrectIdBtn;
+    private Button mWrongIdBtn;
 
     // Database
     private FirebaseFirestore db;
@@ -54,10 +61,9 @@ public class SensorFingerprintActivity extends WearableActivity implements Senso
     // Fingerprint
     private SensorFingerprint mSensorFingerprint;
     private boolean mIdentify;
-
     // File Writer
     private FileWriter mFileWriter;
-    private File mFile;
+    private File mLocalFile;
     // Firebase Storage Ref
     private StorageReference mStorageReference;
 
@@ -66,13 +72,14 @@ public class SensorFingerprintActivity extends WearableActivity implements Senso
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_sensor_fingerprint);
-        initViews();
         Bundle data = getIntent().getExtras();
-        mSensorFingerprint = data.getParcelable("sensorFingerprint");
         mIdentify = data.getBoolean("Identify");
+        mSensorFingerprint = data.getParcelable("sensorFingerprint");
+        initViews();
         Log.d(TAG, "SensorFingerprint Local: " + mSensorFingerprint.toString());
 
         // Init Database
+        FirebaseApp.initializeApp(this.getApplicationContext());
         db = FirebaseFirestore.getInstance();
         mStorageReference = FirebaseStorage.getInstance().getReference();
 
@@ -89,10 +96,23 @@ public class SensorFingerprintActivity extends WearableActivity implements Senso
 
     @Override
     public void onClick(View view) {
-        if(view.getId() == R.id.sensorfingerprint_activity_btn_startover){
-            presenter.startOverButtonClicked();
-        } else if (view.getId() == R.id.sensorfingerprint_activity_btn_exportFingerprint){
-            presenter.exportButtonClicked();
+        switch (view.getId()){
+            case R.id.sensorfingerprint_activity_btn_startover:
+                presenter.startOverButtonClicked();
+                break;
+            case R.id.sensorfingerprint_activity_btn_correctIdentification:
+                presenter.correctDeviceButtonClicked();
+                break;
+            case R.id.sensorfingerprint_activity_btn_wrongIdentification:
+                presenter.wrongDeviceButtonClicked();
+                break;
+            case R.id.sensorfingerprint_activity_btn_exportFingerprints:
+                try {
+                    exportCloudFingerprints();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+                break;
         }
     }
 
@@ -107,38 +127,56 @@ public class SensorFingerprintActivity extends WearableActivity implements Senso
     }
 
     @Override
-    public void updateScoreResult(int score) {
-        int percentageScore = (score * 2);
-        mMatchScore.setText("Match Score: " + percentageScore + " %");
+    public void updateScoreResult(float score) {
+        mMatchScore.setText("Match Score: " + (100f - score));
     }
 
     @Override
     public void navigateToFeatures() {
-        Intent intent = new Intent(this, com.oscarcasarezruiz.wearsensorfingerprinting.FeatureActivity.class);
+        Intent intent = new Intent(this, FeatureActivity.class);
         startActivity(intent);
     }
 
+    @Override
+    public void logCorrectMatch() {
+        updateLogFileOnFirebaseStorage("True");
+    }
+
+    @Override
+    public void logWrongMatch() {
+        updateLogFileOnFirebaseStorage("False");
+    }
+
     private void initViews(){
+        mCorrectIdBtn = findViewById(R.id.sensorfingerprint_activity_btn_wrongIdentification);
+        mWrongIdBtn = findViewById(R.id.sensorfingerprint_activity_btn_correctIdentification);
+        if(mIdentify){
+            mCorrectIdBtn.setOnClickListener(this);
+            mWrongIdBtn.setOnClickListener(this);
+        } else {
+            mCorrectIdBtn.setVisibility(View.GONE);
+            mWrongIdBtn.setVisibility(View.GONE);
+        }
+        findViewById(R.id.sensorfingerprint_activity_btn_exportFingerprints).setOnClickListener(this);
         findViewById(R.id.sensorfingerprint_activity_btn_startover).setOnClickListener(this);
-        findViewById(R.id.sensorfingerprint_activity_btn_exportFingerprint).setOnClickListener(this);
         mResult = findViewById(R.id.sensorfingerprint_activity_tv_result);
         mSensorFingerprintResult = findViewById(R.id.sensorfingerprint_activity_tv_fingerprintResult);
         mMatchScore = findViewById(R.id.sensorfingerprint_activity_tv_matchScore);
     }
 
     private void writeNewSensorFingerprint(){
-        db.collection(COLLECTION_PATH + "Wearables").document(Long.toString(new Date().getTime())).set(mSensorFingerprint.convertSensorFingerprintToHashMap());
+        db.collection(COLLECTION_PATH + "Wearable").document(Long.toString(new Date().getTime())).set(mSensorFingerprint.convertSensorFingerprintToHashMap());
     }
 
     @SuppressLint("LongLogTag")
     private void identifyDevice(){
-        db.collection(COLLECTION_PATH + "Wearables")
+        db.collection(COLLECTION_PATH + "Wearable")
                 .get()
                 .addOnCompleteListener(task -> {
                     boolean matchFound = false;
                     SensorFingerprint currentSensorFingerprint;
                     SensorFingerprint resultSensorFingerprint = new SensorFingerprint();
-                    int score = 0;
+                    float score = Float.MAX_VALUE;
                     if(task.isSuccessful()){
                         for(QueryDocumentSnapshot documentSnapshot : task.getResult()){
                             if(!documentSnapshot.exists()){
@@ -146,9 +184,9 @@ public class SensorFingerprintActivity extends WearableActivity implements Senso
                             }
                             currentSensorFingerprint = new SensorFingerprint(documentSnapshot.getData());
                             Log.d(TAG, "fromCloud: sensorFingerprint: " + currentSensorFingerprint.toString());
-                            int currentScore = currentSensorFingerprint.compareSensorFingerprint(mSensorFingerprint);
+                            float currentScore = currentSensorFingerprint.compareSensorFingerprint(mSensorFingerprint);
                             Log.d(TAG, "readSenorFingerprints: currentScore: " + currentScore);
-                            if(currentScore > score){
+                            if(currentScore <= score){
                                 score = currentScore;
                                 matchFound = true;
                                 resultSensorFingerprint = currentSensorFingerprint;
@@ -158,31 +196,32 @@ public class SensorFingerprintActivity extends WearableActivity implements Senso
                         Log.d(TAG, "Error getting documents: ", task.getException());
                     }
                     presenter.updateFingerprintResult(matchFound);
-                    int finalScore = resultSensorFingerprint.compareSensorFingerprint(mSensorFingerprint);
+                    float finalScore = resultSensorFingerprint.compareSensorFingerprint(mSensorFingerprint);
                     presenter.updateFingerprintScoreResult(finalScore);
                     presenter.updateSensorFingerprint(resultSensorFingerprint);
                 });
     }
 
-    @Override
-    public void exportFingerprint(){
-        Map<String, Object> fingerprintMap = presenter.getSensorFingerprint().convertSensorFingerprintToHashMap();
-        Gson gson = new Gson();
-        String json = gson.toJson(fingerprintMap);
-
-        // Create File
-        mFile = new File(getStorageDir(), fingerprintMap.get("UUID") + ".json");
-        // Write File
-        try {
-            mFileWriter = new FileWriter(mFile);
-            BufferedWriter bw = new BufferedWriter(mFileWriter);
-            bw.write(json);
-            bw.close();
-        } catch (IOException e){
-            e.printStackTrace();
-        }
-        // Upload to Firebase Storage
-        uploadFileToFireStorage();
+    public void downloadLogFile(String result){
+        mLocalFile = new File(getStorageDir(), "ComparisonLogs.csv");
+        StorageReference sensorDataRef = mStorageReference.child("wear-sensordata/comparison_logs/ComparisonLogs.csv");
+        sensorDataRef.getFile(mLocalFile).addOnSuccessListener(new OnSuccessListener<FileDownloadTask.TaskSnapshot>() {
+            @SuppressLint("LongLogTag")
+            @Override
+            public void onSuccess(FileDownloadTask.TaskSnapshot taskSnapshot) {
+                Log.d(TAG, "onSuccess: File Downloaded Successfully");
+                Toast.makeText(SensorFingerprintActivity.this, "File Download Succeeded.", Toast.LENGTH_LONG).show();
+                writeFingerprintToFile(result);
+                uploadFileToFireStorage();
+            }
+        }).addOnFailureListener(new OnFailureListener() {
+            @SuppressLint("LongLogTag")
+            @Override
+            public void onFailure(@NonNull Exception e) {
+                Log.d(TAG, "onSuccess: File Downloaded Failed");
+                Toast.makeText(SensorFingerprintActivity.this, "File Download Failed.", Toast.LENGTH_LONG).show();
+            }
+        });
     }
 
     private String getStorageDir() {
@@ -191,22 +230,155 @@ public class SensorFingerprintActivity extends WearableActivity implements Senso
 
     private void uploadFileToFireStorage(){
         // Upload File to Firebase
-        Uri sensorDataFile = Uri.fromFile(mFile);
-        StorageReference sensorDataRef = mStorageReference.child("wear-sensordata/sensorfingerprints/" + sensorDataFile.getLastPathSegment());
-        UploadTask uploadTask = sensorDataRef.putFile(sensorDataFile);
+        Uri sensorDataFile = Uri.fromFile(mLocalFile);
+        StorageReference sensorDataRef = mStorageReference.child("wear-sensordata/comparison_logs/ComparisonLogs.csv");
+        StorageMetadata metadata = new StorageMetadata.Builder()
+                .setContentType("text/csv")
+                .build();
+        UploadTask uploadTask = sensorDataRef.putFile(sensorDataFile, metadata);
 
         uploadTask.addOnFailureListener(new OnFailureListener() {
+            @SuppressLint("LongLogTag")
             @Override
             public void onFailure(@NonNull Exception e) {
-                Toast.makeText(com.oscarcasarezruiz.wearsensorfingerprinting.SensorFingerprintActivity.this, "Measurements upload failed.", Toast.LENGTH_SHORT).show();
+                Log.d(TAG, "onSuccess: File Uploaded Failed");
+                Toast.makeText(SensorFingerprintActivity.this, "File Upload Failed.", Toast.LENGTH_LONG).show();
             }
         }).addOnSuccessListener(new OnSuccessListener<UploadTask.TaskSnapshot>() {
+            @SuppressLint("LongLogTag")
             @Override
             public void onSuccess(UploadTask.TaskSnapshot taskSnapshot) {
-                Toast.makeText(com.oscarcasarezruiz.wearsensorfingerprinting.SensorFingerprintActivity.this, "Measurements uploaded successfully.", Toast.LENGTH_SHORT).show();
+                Log.d(TAG, "onSuccess: File Uploaded Successfully");
+                Toast.makeText(SensorFingerprintActivity.this, "File Upload Succeeded", Toast.LENGTH_LONG).show();
+                mLocalFile.delete();
             }
         });
+    }
 
+    public void updateLogFileOnFirebaseStorage(String result){
+        downloadLogFile(result);
+    }
+
+    @SuppressLint({"DefaultLocale", "LongLogTag"})
+    public void writeFingerprintToFile(String result){
+        try {
+            Scanner scanner = new Scanner(mLocalFile);
+            while(scanner.hasNextLine()){
+                Log.d(TAG, "File Contents: => " + scanner.nextLine());
+            }
+            scanner.close();
+            mFileWriter = new FileWriter(mLocalFile, true);
+            mFileWriter.write(String.format("\n%s,%s,%s,%s,%f,%f,%f,%f,%f,%f,%f,%s,%s",
+                    mSensorFingerprint.getDeviceModel(),
+                    mSensorFingerprint.getDeviceMfg(),
+                    mSensorFingerprint.getSensorModel(),
+                    mSensorFingerprint.getSensorVendor(),
+                    mSensorFingerprint.getSensorSensitivity(),
+                    mSensorFingerprint.getSensorLinearity(),
+                    mSensorFingerprint.getSensorRawBias(),
+                    mSensorFingerprint.getAccelerometerAvg(),
+                    mSensorFingerprint.getAccelerometerMin(),
+                    mSensorFingerprint.getAccelerometerMax(),
+                    mSensorFingerprint.getAccelerometerStandardDev(),
+                    presenter.getSensorFingerprint().getUUID(),
+                    result)); // Write new fingerprint
+            mFileWriter.close();
+            scanner = new Scanner(mLocalFile);
+            while(scanner.hasNextLine()){
+                Log.d(TAG, "File Contents: => " + scanner.nextLine());
+            }
+            scanner.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public void exportCloudFingerprints() throws IOException {
+        File sensorFingerprintFile = new File(getStorageDir(), "SensorFingerprintData.csv");
+
+        db.collection(COLLECTION_PATH + "Smartphone")
+                .get()
+                .addOnCompleteListener(task -> {
+                    SensorFingerprint currentSensorFingerprint;
+                    if(task.isSuccessful()){
+                        try {
+                            mFileWriter = new FileWriter(sensorFingerprintFile);
+                            mFileWriter.write(String.format("%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n",
+                                    "Device Model",
+                                    "Device Manufacturer",
+                                    "Accelerometer Model",
+                                    "Accelerometer Vendor",
+                                    "Accelerometer Sensitivity",
+                                    "Accelerometer Linearity",
+                                    "Accelerometer Bias",
+                                    "Accelerometer Average",
+                                    "Accelerometer Minimum",
+                                    "Accelerometer Maximum",
+                                    "Accelerometer Standard Deviation",
+                                    "Sensor Fingerprint ID"));
+
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+                        for(QueryDocumentSnapshot documentSnapshot : task.getResult()){
+                            if(!documentSnapshot.exists()){
+                                break;
+                            }
+                            currentSensorFingerprint = new SensorFingerprint(documentSnapshot.getData());
+                            try {
+                                mFileWriter.write(String.format("%s,%s,%s,%s,%f,%f,%f,%f,%f,%f,%f,%s\n",
+                                        currentSensorFingerprint.getDeviceModel(),
+                                        currentSensorFingerprint.getDeviceMfg(),
+                                        currentSensorFingerprint.getSensorModel(),
+                                        currentSensorFingerprint.getSensorVendor(),
+                                        currentSensorFingerprint.getSensorSensitivity(),
+                                        currentSensorFingerprint.getSensorLinearity(),
+                                        currentSensorFingerprint.getSensorRawBias(),
+                                        currentSensorFingerprint.getAccelerometerAvg(),
+                                        currentSensorFingerprint.getAccelerometerMin(),
+                                        currentSensorFingerprint.getAccelerometerMax(),
+                                        currentSensorFingerprint.getAccelerometerStandardDev(),
+                                        currentSensorFingerprint.getUUID()));
+                            } catch (IOException e) {
+                                e.printStackTrace();
+                            }
+                        }
+                        try {
+                            mFileWriter.close();
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+                        uploadFileToFirebaseStorage(sensorFingerprintFile);
+                    }
+                });
+
+    }
+
+    private void uploadFileToFirebaseStorage(File filename){
+        // Upload File to Firebase
+        Uri sensorDataFile = Uri.fromFile(filename);
+        StorageReference sensorDataRef = mStorageReference.child("mobile-sensordata/sensorfingerprints/" + sensorDataFile.getLastPathSegment());
+        StorageMetadata metadata = new StorageMetadata.Builder()
+                .setContentType("text/csv")
+                .build();
+        UploadTask uploadTask = sensorDataRef.putFile(sensorDataFile, metadata);
+
+        uploadTask.addOnFailureListener(new OnFailureListener() {
+            @SuppressLint("LongLogTag")
+            @Override
+            public void onFailure(@NonNull Exception e) {
+                Log.d(TAG, "onSuccess: File Uploaded Failed");
+                Toast.makeText(SensorFingerprintActivity.this, "File Upload Failed.", Toast.LENGTH_LONG).show();
+            }
+        }).addOnSuccessListener(new OnSuccessListener<UploadTask.TaskSnapshot>() {
+            @SuppressLint("LongLogTag")
+            @Override
+            public void onSuccess(UploadTask.TaskSnapshot taskSnapshot) {
+                Log.d(TAG, "onSuccess: File Uploaded Successfully");
+                Toast.makeText(SensorFingerprintActivity.this, "File Upload Succeeded", Toast.LENGTH_LONG).show();
+                filename.delete();
+            }
+        });
     }
 
 }

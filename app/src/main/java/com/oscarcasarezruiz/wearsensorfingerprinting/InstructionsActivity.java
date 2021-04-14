@@ -52,26 +52,19 @@ public class InstructionsActivity extends FragmentActivity implements Instructio
     // Motion Sensor
     private Sensor mAccelerometer;
     private SensorManager mSensorManager;
-    private ArrayList<float[]> accelerometerMeasurement;
+    private ArrayList<Float> accelerometerMeasurement;
     private SensorFingerprint sensorFingerprint;
-    private float[] sensorNoise;
-    private float[] senorRawBias;
-    private float[] sensorMinimum = new float[]{Float.MAX_VALUE, Float.MAX_VALUE, Float.MAX_VALUE};
-    private float[] sensorMaximum = new float[]{-Float.MAX_VALUE, -Float.MAX_VALUE, -Float.MAX_VALUE};
-    private float[] sensorAverage;
-    private float[] sensorStdev;
+    private float senorRawBias;
+    private float sensorMinimum = Float.MAX_VALUE;
+    private float sensorMaximum = -Float.MAX_VALUE;
+    private float sensorAverage;
+    private float sensorStdev;
 
     //UI Properties
     private TextView mTraceView1;
     private Button mCollectAndNextButton;
     private boolean mIsLogging;
     private boolean mIdentify;
-
-    // File Writer
-    private FileWriter mFileWriter;
-    private File mFile;
-    // Firebase Storage Ref
-    private StorageReference mStorageReference;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -87,10 +80,6 @@ public class InstructionsActivity extends FragmentActivity implements Instructio
         accelerometerMeasurement = new ArrayList<>();
         sensorFingerprint = new SensorFingerprint();
 
-        FirebaseApp.initializeApp(this.getApplicationContext());
-        //Init Firebase Storage
-        mStorageReference = FirebaseStorage.getInstance().getReference();
-        createFile();
     }
 
     @Override
@@ -101,8 +90,6 @@ public class InstructionsActivity extends FragmentActivity implements Instructio
                 mCollectAndNextButton.setEnabled(false);
                 presenter.collectTraceButtonClicked();
             } else {
-                stopWritingData();
-                uploadFileToFireStorage();
                 presenter.sensorFingerprintResultsButtonClicked();
             }
         }
@@ -137,11 +124,10 @@ public class InstructionsActivity extends FragmentActivity implements Instructio
         if(mIsLogging){
             int SensorType = sensorEvent.sensor.getType();
             if(SensorType == Sensor.TYPE_ACCELEROMETER){
-                float[] data = sensorEvent.values;
-                accelerometerMeasurement.add(data);
-                updateMinValueArr(data);
-                updateMaxValueArr(data);
-                writeToFile("TYPE_ACCELEROMETER", data);
+                float ZValues = sensorEvent.values[2];
+                accelerometerMeasurement.add(ZValues);
+                updateMinValueArr(ZValues);
+                updateMaxValueArr(ZValues);
             }
         }
     }
@@ -160,10 +146,9 @@ public class InstructionsActivity extends FragmentActivity implements Instructio
 
     private void saveTrace(){
         presenter.saveFirstTrace(Utils.AverageTracesMeasured(accelerometerMeasurement));
-        sensorNoise = Utils.calculateSensorNoise(accelerometerMeasurement);
         sensorAverage = Utils.AverageTracesMeasured(accelerometerMeasurement);
         sensorStdev = Utils.standardDeviationMeasurements(accelerometerMeasurement);
-        senorRawBias = Utils.calculateSensorBias(new SensorTrace(sensorAverage[0], sensorAverage[1], sensorAverage[2]));
+        senorRawBias = Utils.calculateSensorBias(sensorAverage);
         accelerometerMeasurement.clear();
     }
 
@@ -202,9 +187,6 @@ public class InstructionsActivity extends FragmentActivity implements Instructio
         if(!Build.MANUFACTURER.isEmpty()){
             sensorFingerprint.setDeviceMfg(Build.MANUFACTURER);
         }
-        // Device OS
-        sensorFingerprint.setDeviceOS(Utils.getDeviceOS());
-
         // Accelerometer Data
         // Accelerometer Model
         if(!mAccelerometer.getName().isEmpty()){
@@ -214,8 +196,6 @@ public class InstructionsActivity extends FragmentActivity implements Instructio
         if(!mAccelerometer.getVendor().isEmpty()){
             sensorFingerprint.setSensorVendor(mAccelerometer.getVendor());
         }
-        // Accelerometer Noise
-        sensorFingerprint.setSensorNoise(sensorNoise);
         // Accelerometer Minimum
         sensorFingerprint.setAccelerometerMin(sensorMinimum);
         // Accelerometer Maximum
@@ -227,97 +207,22 @@ public class InstructionsActivity extends FragmentActivity implements Instructio
         // Accelerometer Bias
         sensorFingerprint.setSensorRawBias(senorRawBias);
         // Accelerometer Sensitivity
-        sensorFingerprint.setSensorSensitivity(Utils.calculateSensorSensitivity(presenter.getFirstTrace().getAccelerometerZ(), SensorManager.GRAVITY_EARTH * -1));
+        sensorFingerprint.setSensorSensitivity(Utils.calculateSensorSensitivity(presenter.getFirstTrace(), SensorManager.GRAVITY_EARTH * -1));
         // Accelerometer Linearity
-        sensorFingerprint.setSensorLinearity(Utils.calculateSensorLinearity(presenter.getFirstTrace().getAccelerometerZ(), SensorManager.GRAVITY_EARTH * -1, 0));
+        sensorFingerprint.setSensorLinearity(Utils.calculateSensorLinearity(presenter.getFirstTrace(), SensorManager.GRAVITY_EARTH * -1, 0));
     }
 
-    private void writeToFile(String sensor, float[] events){
-        SimpleDateFormat simpleDateFormat = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ", Locale.getDefault());
-        try {
-            mFileWriter.write(String.format("%s; %s; %f; %f; %f\n", simpleDateFormat.format(new Date()),sensor,events[0],events[1],events[2]));
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-
-    private void createFile(){
-        // Create File
-        Format f = new SimpleDateFormat("MM_dd_yyyy_hh_mm_ss", Locale.getDefault());
-        mFile = new File(getStorageDir(), Build.MODEL + "wear_sensorData_" + f.format(new Date()) + ".csv");
-        // Write File Header
-        try {
-            mFileWriter = new FileWriter(mFile);
-            mFileWriter.write(String.format("%s; %s; %s; %s; %s\n", "Time", "Sensor", "X-Axis", "Y-Axis", "Z-Axis"));
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-
-    private void stopWritingData(){
-        // Stop Writing to File
-        try {
-            mFileWriter.close();
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-
-    private String getStorageDir() {
-        return Objects.requireNonNull(this.getExternalFilesDir(null)).getAbsolutePath();
-    }
-
-    private void uploadFileToFireStorage(){
-        // Upload File to Firebase
-        Uri sensorDataFile = Uri.fromFile(mFile);
-        StorageReference sensorDataRef = mStorageReference.child("wear-sensordata/sensorfingerprint_measurements/" + sensorDataFile.getLastPathSegment());
-        StorageMetadata metadata = new StorageMetadata.Builder()
-                .setContentType("text/csv")
-                .setCustomMetadata("device", Build.ID)
-                .build();
-        UploadTask uploadTask = sensorDataRef.putFile(sensorDataFile, metadata);
-
-        uploadTask.addOnFailureListener(new OnFailureListener() {
-            @Override
-            public void onFailure(@NonNull Exception e) {
-                Toast.makeText(com.oscarcasarezruiz.wearsensorfingerprinting.InstructionsActivity.this, "Measurements upload failed.", Toast.LENGTH_LONG).show();
-            }
-        }).addOnSuccessListener(new OnSuccessListener<UploadTask.TaskSnapshot>() {
-            @Override
-            public void onSuccess(UploadTask.TaskSnapshot taskSnapshot) {
-                Toast.makeText(com.oscarcasarezruiz.wearsensorfingerprinting.InstructionsActivity.this, "Measurements uploaded successfully.", Toast.LENGTH_LONG).show();
-            }
-        });
-
-    }
-
-    private void updateMinValueArr(float[] data){
-        // X-Values
-        if(data[0] < sensorMinimum[0]){
-            sensorMinimum[0] = data[0];
-        }
-        // Y-Values
-        if(data[1] < sensorMinimum[1]){
-            sensorMinimum[1] = data[1];
-        }
+    private void updateMinValueArr(float data){
         // Z-Values
-        if(data[2] < sensorMinimum[2]){
-            sensorMinimum[2] = data[2];
+        if(data < sensorMinimum){
+            sensorMinimum = data;
         }
     }
 
-    private void updateMaxValueArr(float[] data){
-        // X-Values
-        if(data[0] > sensorMaximum[0]){
-            sensorMaximum[0] = data[0];
-        }
-        // Y-Values
-        if(data[1] > sensorMaximum[1]){
-            sensorMaximum[1] = data[1];
-        }
+    private void updateMaxValueArr(float data){
         // Z-Values
-        if(data[2] > sensorMaximum[2]){
-            sensorMaximum[2] = data[2];
+        if(data > sensorMaximum){
+            sensorMaximum = data;
         }
     }
 }

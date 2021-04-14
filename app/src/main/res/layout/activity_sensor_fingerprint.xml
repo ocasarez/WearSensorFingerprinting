@@ -3,8 +3,8 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    tools:context=".SensorFingerprintActivity"
-    android:background="@color/white">
+    android:background="@color/white"
+    tools:context=".SensorFingerprintActivity">
 
     <ScrollView
         android:layout_width="match_parent"
@@ -14,7 +14,8 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:gravity="center"
-            android:orientation="vertical">
+            android:orientation="vertical"
+            android:padding="20dp">
 
             <TextView
                 android:id="@+id/sensorfingerprint_activity_tv_result"
@@ -34,7 +35,7 @@
                 android:fontFamily="@font/roboto"
                 android:gravity="center"
                 android:textColor="#000000"
-                android:textSize="14sp"/>
+                android:textSize="14sp" />
 
             <TextView
                 android:id="@+id/sensorfingerprint_activity_tv_fingerprintResult"
@@ -55,10 +56,23 @@
                 android:text="@string/sensorfingerprint_startOver" />
 
             <Button
-                android:id="@+id/sensorfingerprint_activity_btn_exportFingerprint"
+                android:id="@+id/sensorfingerprint_activity_btn_exportFingerprints"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="@string/export_fingerprint" />
+
+            <Button
+                android:id="@+id/sensorfingerprint_activity_btn_correctIdentification"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/correct_identification" />
+
+            <Button
+                android:id="@+id/sensorfingerprint_activity_btn_wrongIdentification"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/wrong_identification"
+                android:fitsSystemWindows="true"/>
 
         </LinearLayout>
     </ScrollView>

@@ -5,18 +5,15 @@ import com.oscarcasarezruiz.wearsensorfingerprinting.models.SensorTrace;
 public class InstructionsActivityPresenter {
 
     private View mView;
-    private SensorTrace firstTrace;
+    private float mZAccelerometerData;
 
     public InstructionsActivityPresenter (View view){
         mView = view;
-        firstTrace = new SensorTrace();
     }
 
-    public void saveFirstTrace(float[] trace){
-        firstTrace.setAccelerometerX(trace[0]);
-        firstTrace.setAccelerometerY(trace[1]);
-        firstTrace.setAccelerometerZ(trace[2]);
-        mView.showFirstTrace(String.format("[%f,\n%f\n,%f]", trace[0], trace[1], trace[2]));
+    public void saveFirstTrace(float trace){
+        mZAccelerometerData = trace;
+        mView.showFirstTrace(String.format("%f", trace));
     }
 
 
@@ -28,8 +25,8 @@ public class InstructionsActivityPresenter {
         mView.navigateToSensorFingerprintResult();
     }
 
-    public SensorTrace getFirstTrace() {
-        return firstTrace;
+    public float getFirstTrace() {
+        return mZAccelerometerData;
     }
 
     public interface View {
